@@ -1,0 +1,11 @@
+LIBRARY      "vsng_telemetry"
+
+
+EXPORTS
+create_instrument
+update_instrument
+delete_instrument
+pick_instrument
+move_instrument
+unpick_instrument
+update_instrument_ex
