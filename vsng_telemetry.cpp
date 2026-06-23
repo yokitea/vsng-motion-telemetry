@@ -71,7 +71,8 @@ struct panel_info {
 // Global variables
 panel_info* m_info = NULL;
 SOCKET m_socket = INVALID_SOCKET;
-sockaddr_in m_dest_addr;
+sockaddr_in m_dest_addr;      // FlyPT Mover (port 4444) - motion data for 6DoF
+sockaddr_in m_simhub_addr;    // SimHub (port 4445) - instrument panel data
 bool m_winsock_initialized = false;
 
 // Variables for calculating derivatives (acceleration)
@@ -125,10 +126,17 @@ void create_instrument(void* info) {
 		m_winsock_initialized = true;
 		m_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 		if (m_socket != INVALID_SOCKET) {
+			// FlyPT Mover - port 4444 (motion data for Thanos Controller / 6DoF hardware)
 			m_dest_addr.sin_family = AF_INET;
-			m_dest_addr.sin_port = htons(4444); // Send to FlyPT Mover port 4444
+			m_dest_addr.sin_port = htons(4444);
 			m_dest_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-			log_debug("Socket initialized successfully");
+
+			// SimHub - port 4445 (instrument panel data)
+			m_simhub_addr.sin_family = AF_INET;
+			m_simhub_addr.sin_port = htons(4445);
+			m_simhub_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+			log_debug("Socket initialized successfully (FlyPT:4444, SimHub:4445)");
 		} else {
 			log_debug("Failed to create socket");
 		}
@@ -236,7 +244,41 @@ void update_instrument(HDC hdc) {
 	packet[4] = m_filtered_pitch;
 	packet[5] = m_filtered_yaw;
 
+	// --- Kirim data motion ke FlyPT Mover (port 4444) untuk 6DoF / Thanos Controller ---
 	sendto(m_socket, (const char*)packet, sizeof(packet), 0, (struct sockaddr*)&m_dest_addr, sizeof(m_dest_addr));
+
+	// --- Kirim data instrumen ke SimHub (port 4445) ---
+	// RPM: coba motor_rpm dulu, fallback ke rpm1 (twin engine seperti WHEC-STB)
+	float rpm = 0.0f;
+	if (m_info->motor_rpm  && *m_info->motor_rpm  > 0.0f) rpm = *m_info->motor_rpm;
+	else if (m_info->motor_rpm1 && *m_info->motor_rpm1 > 0.0f) rpm = *m_info->motor_rpm1;
+	else if (m_info->motor_rpm2 && *m_info->motor_rpm2 > 0.0f) rpm = *m_info->motor_rpm2;
+
+	float spd_kts = velocity * 1.94384f; // Konversi m/s ke Knots
+	float fuel    = m_info->fuel_left ? *m_info->fuel_left : 0.0f;
+
+	// Heading: konversi beta (radian) ke derajat (0-360)
+	float hdg_deg = m_info->beta ? (*m_info->beta * 57.29578f) : 0.0f;
+	if (hdg_deg < 0.0f) hdg_deg += 360.0f;
+
+	int eng_on = (m_info->engine_on && *m_info->engine_on) ? 1 : 0;
+	int lgt_on = (m_info->light_on  && *m_info->light_on)  ? 1 : 0;
+	int stall  = (m_info->stall     && *m_info->stall)     ? 1 : 0;
+
+	// Format: Key:Value; - mudah dibaca oleh SimHub Custom UDP Plugin
+	char sim_buf[256];
+	int sim_len = sprintf(sim_buf,
+		"RPM:%.1f;SPD:%.2f;FUEL:%.1f;HDG:%.1f;ENG:%d;LGT:%d;STALL:%d;ROLL:%.2f;PTCH:%.2f;HEAV:%.2f;",
+		rpm, spd_kts, fuel, hdg_deg, eng_on, lgt_on, stall, roll, pitch, vert);
+
+	// Log paket SimHub setiap 2 detik untuk debug
+	if (curr_time - m_last_log_time < 100) { // hanya log di frame yg sama dgn velocity log
+		log_debug(sim_buf);
+	}
+
+	if (sim_len > 0) {
+		sendto(m_socket, sim_buf, sim_len, 0, (struct sockaddr*)&m_simhub_addr, sizeof(m_simhub_addr));
+	}
 }
 
 void update_instrument_ex(void* info, HDC hdc) {
