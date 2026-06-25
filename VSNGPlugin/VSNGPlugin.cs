@@ -240,7 +240,7 @@ namespace VSNGPlugin
 
         private async Task WebSocketLoop(CancellationToken ct)
         {
-            Uri serverUri = new Uri("ws://127.0.0.1:8080");
+            Uri serverUri = new Uri("ws://127.0.0.1:8000/ws/telemetry");
 
             while (!ct.IsCancellationRequested)
             {
@@ -250,7 +250,7 @@ namespace VSNGPlugin
                     {
                         await _wsClient.ConnectAsync(serverUri, ct);
                         _wsConnected = true;
-                        log.Info("VSNGPlugin: Terhubung ke IOS Server via WebSocket (ws://127.0.0.1:8080)");
+                        log.Info("VSNGPlugin: Terhubung ke IOS Server via WebSocket (ws://127.0.0.1:8000/ws/telemetry)");
 
                         // Start Receive loop as a separate unawaited task
                         var receiveTask = Task.Run(() => ReceiveLoop(_wsClient, ct), ct);
