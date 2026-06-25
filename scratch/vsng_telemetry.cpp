@@ -80,6 +80,9 @@ SOCKET m_command_socket = INVALID_SOCKET;
 sockaddr_in m_command_addr;
 bool m_engine_failed = false;
 bool m_rudder_failed = false;
+bool m_hull_impact = false;
+DWORD m_hull_impact_timer = 0;
+bool m_blackout = false;
 
 
 // Variables for calculating derivatives (acceleration)
@@ -221,6 +224,16 @@ void update_instrument(HDC hdc) {
 			} else if (strcmp(buffer, "CMD:RUDDER_RECOVER") == 0) {
 				m_rudder_failed = false;
 				log_debug("Command received: RUDDER_RECOVER");
+			} else if (strcmp(buffer, "CMD:HULL_IMPACT") == 0) {
+				m_hull_impact = true;
+				m_hull_impact_timer = GetTickCount();
+				log_debug("Command received: HULL_IMPACT");
+			} else if (strcmp(buffer, "CMD:BLACKOUT") == 0) {
+				m_blackout = true;
+				log_debug("Command received: BLACKOUT");
+			} else if (strcmp(buffer, "CMD:BLACKOUT_RECOVER") == 0) {
+				m_blackout = false;
+				log_debug("Command received: BLACKOUT_RECOVER");
 			}
 		}
 	}
@@ -242,8 +255,23 @@ void update_instrument(HDC hdc) {
 	if (m_rudder_failed) {
 		if (m_info->control_delta) *m_info->control_delta = 0.0f;
 	}
+	if (m_blackout) {
+		if (m_info->light_on) *m_info->light_on = false;
+		if (m_info->engine_on) *m_info->engine_on = false;
+	}
 	
 	DWORD curr_time = GetTickCount();
+
+	// Simulate Hull Impact (Shark or Rock)
+	if (m_hull_impact) {
+		if (curr_time - m_hull_impact_timer < 500) {
+			// Violent roll and heave
+			if (m_info->phi) *m_info->phi = 0.35f; // ~20 degrees roll
+			if (m_info->vert) *m_info->vert = 5.0f; // Jolt upward
+		} else {
+			m_hull_impact = false; // Impact over
+		}
+	}
 
 	if (curr_time - m_last_log_time > 2000) { // Log every 2 seconds to avoid bloat
 		char buff[256];
