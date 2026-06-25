@@ -1,0 +1,4 @@
+3590484: DLL_PROCESS_ATTACH
+3590484: create_instrument called
+3590484: Socket initialized successfully
+10951578: delete_instrument called
