@@ -75,6 +75,13 @@ sockaddr_in m_dest_addr;      // FlyPT Mover (port 4444) - motion data for 6DoF
 sockaddr_in m_simhub_addr;    // SimHub (port 4445) - instrument panel data
 bool m_winsock_initialized = false;
 
+// Command Listener Variables
+SOCKET m_command_socket = INVALID_SOCKET;
+sockaddr_in m_command_addr;
+bool m_engine_failed = false;
+bool m_rudder_failed = false;
+
+
 // Variables for calculating derivatives (acceleration)
 float m_prev_velocity = 0.0f;
 float m_prev_vert = 0.0f;
@@ -140,6 +147,23 @@ void create_instrument(void* info) {
 		} else {
 			log_debug("Failed to create socket");
 		}
+
+		// Initialize Command Listener Socket
+		m_command_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+		if (m_command_socket != INVALID_SOCKET) {
+			m_command_addr.sin_family = AF_INET;
+			m_command_addr.sin_port = htons(4446);
+			m_command_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+			if (bind(m_command_socket, (struct sockaddr*)&m_command_addr, sizeof(m_command_addr)) == 0) {
+				u_long mode = 1;
+				ioctlsocket(m_command_socket, FIONBIO, &mode);
+				log_debug("Command socket listening on 4446");
+			} else {
+				log_debug("Failed to bind command socket");
+			}
+		} else {
+			log_debug("Failed to create command socket");
+		}
 	} else {
 		log_debug("Failed to initialize Winsock");
 	}
@@ -160,6 +184,10 @@ void delete_instrument() {
 		closesocket(m_socket);
 		m_socket = INVALID_SOCKET;
 	}
+	if (m_command_socket != INVALID_SOCKET) {
+		closesocket(m_command_socket);
+		m_command_socket = INVALID_SOCKET;
+	}
 	if (m_winsock_initialized) {
 		WSACleanup();
 		m_winsock_initialized = false;
@@ -172,6 +200,48 @@ void unpick_instrument() {}
 
 void update_instrument(HDC hdc) {
 	if (!m_info) return;
+
+	// Process incoming commands
+	if (m_command_socket != INVALID_SOCKET) {
+		char buffer[256];
+		int recv_len = recvfrom(m_command_socket, buffer, sizeof(buffer) - 1, 0, NULL, NULL);
+		if (recv_len > 0) {
+			buffer[recv_len] = '\0';
+			if (strcmp(buffer, "CMD:ENGINE_FAIL") == 0) {
+				m_engine_failed = true;
+				log_debug("Command received: ENGINE_FAIL");
+			} else if (strcmp(buffer, "CMD:ENGINE_RECOVER") == 0) {
+				m_engine_failed = false;
+				if (m_info->engine_on) *m_info->engine_on = true;
+				if (m_info->stall) *m_info->stall = false;
+				log_debug("Command received: ENGINE_RECOVER");
+			} else if (strcmp(buffer, "CMD:RUDDER_FAIL") == 0) {
+				m_rudder_failed = true;
+				log_debug("Command received: RUDDER_FAIL");
+			} else if (strcmp(buffer, "CMD:RUDDER_RECOVER") == 0) {
+				m_rudder_failed = false;
+				log_debug("Command received: RUDDER_RECOVER");
+			}
+		}
+	}
+
+	// Apply faults to the simulation state
+	if (m_engine_failed) {
+		if (m_info->engine_on) *m_info->engine_on = false;
+		if (m_info->stall) *m_info->stall = true;
+		if (m_info->motor_rpm) *m_info->motor_rpm = 0.0f;
+		if (m_info->motor_rpm1) *m_info->motor_rpm1 = 0.0f;
+		if (m_info->motor_rpm2) *m_info->motor_rpm2 = 0.0f;
+		
+		// Force control inputs to neutral/zero so the physics engine actually cuts power
+		if (m_info->control_rpm) *m_info->control_rpm = 0.5f;
+		if (m_info->control_rpm1) *m_info->control_rpm1 = 0.5f;
+		if (m_info->control_rpm2) *m_info->control_rpm2 = 0.5f;
+		if (m_info->control_mixture) *m_info->control_mixture = 0.0f;
+	}
+	if (m_rudder_failed) {
+		if (m_info->control_delta) *m_info->control_delta = 0.0f;
+	}
 	
 	DWORD curr_time = GetTickCount();
 
