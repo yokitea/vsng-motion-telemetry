@@ -141,12 +141,12 @@ void create_instrument(void* info) {
 			m_dest_addr.sin_port = htons(4444);
 			m_dest_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 
-			// SimHub - port 4445 (instrument panel data)
+			// Telemetry Server - port 4446 (instrument panel data)
 			m_simhub_addr.sin_family = AF_INET;
-			m_simhub_addr.sin_port = htons(4445);
+			m_simhub_addr.sin_port = htons(4446);
 			m_simhub_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 
-			log_debug("Socket initialized successfully (FlyPT:4444, SimHub:4445)");
+			log_debug("Socket initialized successfully (FlyPT:4444, Telemetry:4446)");
 		} else {
 			log_debug("Failed to create socket");
 		}
@@ -155,12 +155,12 @@ void create_instrument(void* info) {
 		m_command_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 		if (m_command_socket != INVALID_SOCKET) {
 			m_command_addr.sin_family = AF_INET;
-			m_command_addr.sin_port = htons(4446);
+			m_command_addr.sin_port = htons(4447);
 			m_command_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 			if (bind(m_command_socket, (struct sockaddr*)&m_command_addr, sizeof(m_command_addr)) == 0) {
 				u_long mode = 1;
 				ioctlsocket(m_command_socket, FIONBIO, &mode);
-				log_debug("Command socket listening on 4446");
+				log_debug("Command socket listening on 4447");
 			} else {
 				log_debug("Failed to bind command socket");
 			}
@@ -363,10 +363,10 @@ void update_instrument(HDC hdc) {
 	int lgt_on = (m_info->light_on  && *m_info->light_on)  ? 1 : 0;
 	int stall  = (m_info->stall     && *m_info->stall)     ? 1 : 0;
 
-	// Format: Key:Value; - mudah dibaca oleh SimHub Custom UDP Plugin
+	// Format: Key:Value; - mudah dibaca oleh Telemetry Server
 	char sim_buf[256];
 	int sim_len = sprintf(sim_buf,
-		"RPM:%.1f;SPD:%.2f;FUEL:%.1f;HDG:%.1f;ENG:%d;LGT:%d;STALL:%d;ROLL:%.2f;PTCH:%.2f;HEAV:%.2f;",
+		"RPM:%.1f;SPD:%.2f;FUEL:%.1f;HDG:%.1f;ENG:%d;LGT:%d;STALL:%d;ROLL:%.2f;PTCH:%.2f;HEAV:%.2f;DMN:Laut;",
 		rpm, spd_kts, fuel, hdg_deg, eng_on, lgt_on, stall, roll, pitch, vert);
 
 	// Log paket SimHub setiap 2 detik untuk debug

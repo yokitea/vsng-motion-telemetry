@@ -50,6 +50,7 @@ namespace VSNGPlugin
         private double _roll     = 0;
         private double _pitch    = 0;
         private double _heave    = 0;
+        private string _domain   = "Laut";
 
         // Command states
         private int          _decisionActive = 0;
@@ -90,6 +91,7 @@ namespace VSNGPlugin
             pluginManager.AddProperty("Roll",        GetType(), typeof(double), "Ship Roll angle");
             pluginManager.AddProperty("Pitch",       GetType(), typeof(double), "Ship Pitch angle");
             pluginManager.AddProperty("Heave",       GetType(), typeof(double), "Ship Heave (vert vel)");
+            pluginManager.AddProperty("Domain",      GetType(), typeof(string), "Simulation Domain (Laut/Udara)");
 
             pluginManager.AddProperty("Decision_Active", GetType(), typeof(int), "1 if decision overlay should be shown");
             pluginManager.AddProperty("Decision_Visible_A", GetType(), typeof(int), "1 if Option A is visible");
@@ -115,6 +117,7 @@ namespace VSNGPlugin
             bool isConnected = (DateTime.Now - _lastReceived).TotalSeconds < 3.0;
 
             double rpm, spd, fuel, hdg, eng, lgt, stall, rll, ptc, hev;
+            string dmn;
             lock (_lock)
             {
                 rpm   = _rpm;
@@ -127,6 +130,7 @@ namespace VSNGPlugin
                 rll   = _roll;
                 ptc   = _pitch;
                 hev   = _heave;
+                dmn   = _domain;
             }
 
             pluginManager.SetPropertyValue("RPM",         GetType(), rpm);
@@ -139,6 +143,7 @@ namespace VSNGPlugin
             pluginManager.SetPropertyValue("Roll",        GetType(), rll);
             pluginManager.SetPropertyValue("Pitch",       GetType(), ptc);
             pluginManager.SetPropertyValue("Heave",       GetType(), hev);
+            pluginManager.SetPropertyValue("Domain",      GetType(), dmn);
             pluginManager.SetPropertyValue("Connected",   GetType(), isConnected ? 1.0 : 0.0);
             pluginManager.SetPropertyValue("IOS_Connected", GetType(), _wsConnected ? 1.0 : 0.0);
 
@@ -255,38 +260,11 @@ namespace VSNGPlugin
                         // Start Receive loop as a separate unawaited task
                         var receiveTask = Task.Run(() => ReceiveLoop(_wsClient, ct), ct);
 
-                        // Loop pengiriman data (10Hz / setiap 100ms)
+                        // Loop untuk menjaga koneksi tetap hidup (Keep-Alive)
+                        // Pengiriman telemetri via WS dimatikan karena sudah di-handle oleh LUP Server di Port 4446
                         while (_wsClient.State == WebSocketState.Open && !ct.IsCancellationRequested)
                         {
-                            double rpm, spd, fuel, hdg, eng, lgt, stall, rll, ptc, hev;
-                            lock (_lock)
-                            {
-                                rpm   = _rpm;
-                                spd   = _speed;
-                                fuel  = _fuel;
-                                hdg   = _heading;
-                                eng   = _engineOn;
-                                lgt   = _lightOn;
-                                stall = _stall;
-                                rll   = _roll;
-                                ptc   = _pitch;
-                                hev   = _heave;
-                            }
-
-                            long timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                            int gameRunning = (DateTime.Now - _lastReceived).TotalSeconds < 3.0 ? 1 : 0;
-
-                            // Format JSON Terstandarisasi
-                            string json = string.Format(CultureInfo.InvariantCulture,
-                                "{{\"domain\":\"Laut\",\"timestamp\":{0},\"telemetry\":{{\"rpm\":{1},\"speed\":{2},\"fuel\":{3},\"heading\":{4},\"engine_on\":{5},\"light_on\":{6},\"stall\":{7},\"roll\":{8},\"pitch\":{9},\"heave\":{10}}},\"status\":{{\"domain\":\"Laut\",\"ios_connected\":1,\"game_running\":{11}}}}}",
-                                timestamp, rpm, spd, fuel, hdg, eng, lgt, stall, rll, ptc, hev, gameRunning);
-
-                            byte[] buffer = Encoding.UTF8.GetBytes(json);
-                            var segment = new ArraySegment<byte>(buffer);
-
-                            await _wsClient.SendAsync(segment, WebSocketMessageType.Text, true, ct);
-
-                            await Task.Delay(100, ct); // Tunggu 100ms
+                            await Task.Delay(1000, ct); // Tunggu 1 detik
                         }
                     }
                     catch (Exception ex)
@@ -414,6 +392,12 @@ namespace VSNGPlugin
 
                     string key   = part.Substring(0, colonIdx).Trim();
                     string valStr = part.Substring(colonIdx + 1).Trim();
+
+                    if (key == "DMN")
+                    {
+                        _domain = valStr;
+                        continue;
+                    }
 
                     double val;
                     if (!double.TryParse(valStr, NumberStyles.Float, CultureInfo.InvariantCulture, out val))
